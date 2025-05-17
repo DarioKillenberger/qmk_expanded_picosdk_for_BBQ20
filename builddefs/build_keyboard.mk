@@ -53,13 +53,13 @@ ifdef SKIP_VERSION
 endif
 
 # Generate the version.h file
-VERSION_H_FLAGS :=
+VERSION_H_FLAGS := --skip-git # Always skip git for version.h after submodule integration
 ifdef SKIP_VERSION
-VERSION_H_FLAGS += --skip-all
+VERSION_H_FLAGS += --skip-all # --skip-all implies --skip-git, this will ensure --skip-all takes precedence if set
 endif
-ifdef SKIP_GIT
-VERSION_H_FLAGS += --skip-git
-endif
+# ifdef SKIP_GIT # This check is now less critical as --skip-git is default
+# VERSION_H_FLAGS += --skip-git
+# endif
 
 # Determine which subfolders exist.
 KEYBOARD_FOLDER_PATH_1 := $(KEYBOARD)

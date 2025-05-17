@@ -1,15 +1,11 @@
-# Finds (or builds) the Pioasm executable
+# Finds (or builds) the pioasm executable
 #
-# This will define the following variables
+# This will define the following imported targets
 #
-#    Pioasm_FOUND
-#
-# and the following imported targets
-#
-#     Pioasm
+#     pioasm
 #
 
-if (NOT Pioasm_FOUND)
+if (NOT TARGET pioasm)
     # todo we would like to use pckgconfig to look for it first
     # see https://pabloariasal.github.io/2018/02/19/its-time-to-do-cmake-right/
 
@@ -17,37 +13,40 @@ if (NOT Pioasm_FOUND)
 
     set(PIOASM_SOURCE_DIR ${PICO_SDK_PATH}/tools/pioasm)
     set(PIOASM_BINARY_DIR ${CMAKE_BINARY_DIR}/pioasm)
+    set(PIOASM_INSTALL_DIR ${CMAKE_BINARY_DIR}/pioasm-install CACHE PATH "Directory where pioasm has been installed" FORCE)
 
-    set(PioasmBuild_TARGET PioasmBuild)
-    set(Pioasm_TARGET Pioasm)
+    set(pioasmBuild_TARGET pioasmBuild)
+    set(pioasm_TARGET pioasm)
 
-    if (NOT TARGET ${PioasmBuild_TARGET})
+    if (NOT TARGET ${pioasmBuild_TARGET})
         pico_message_debug("PIOASM will need to be built")
-#        message("Adding external project ${PioasmBuild_Target} in ${CMAKE_CURRENT_LIST_DIR}}")
-        ExternalProject_Add(${PioasmBuild_TARGET}
+#        message("Adding external project ${pioasmBuild_Target} in ${CMAKE_CURRENT_LIST_DIR}}")
+        ExternalProject_Add(${pioasmBuild_TARGET}
                 PREFIX pioasm
                 SOURCE_DIR ${PIOASM_SOURCE_DIR}
                 BINARY_DIR ${PIOASM_BINARY_DIR}
-                CMAKE_ARGS "-DCMAKE_MAKE_PROGRAM:FILEPATH=${CMAKE_MAKE_PROGRAM}"
+                INSTALL_DIR ${PIOASM_INSTALL_DIR}
+                CMAKE_ARGS
+                    "--no-warn-unused-cli"
+                    "-DCMAKE_MAKE_PROGRAM:FILEPATH=${CMAKE_MAKE_PROGRAM}"
+                    "-DPIOASM_FLAT_INSTALL=1"
+                    "-DCMAKE_INSTALL_PREFIX=${PIOASM_INSTALL_DIR}"
+                    "-DCMAKE_RULE_MESSAGES=OFF" # quieten the build
+                    "-DCMAKE_INSTALL_MESSAGE=NEVER" # quieten the install
                 CMAKE_CACHE_ARGS "-DPIOASM_EXTRA_SOURCE_FILES:STRING=${PIOASM_EXTRA_SOURCE_FILES}"
                 BUILD_ALWAYS 1 # force dependency checking
-                INSTALL_COMMAND ""
+                EXCLUDE_FROM_ALL TRUE
                 )
     endif()
 
     if (CMAKE_HOST_WIN32)
-        set(Pioasm_EXECUTABLE ${PIOASM_BINARY_DIR}/pioasm.exe)
+        set(pioasm_EXECUTABLE ${PIOASM_INSTALL_DIR}/pioasm/pioasm.exe)
     else()
-        set(Pioasm_EXECUTABLE ${PIOASM_BINARY_DIR}/pioasm)
+        set(pioasm_EXECUTABLE ${PIOASM_INSTALL_DIR}/pioasm/pioasm)
     endif()
-    if(NOT TARGET ${Pioasm_TARGET})
-#        message("Adding executable ${Pioasm_Target} in ${CMAKE_CURRENT_LIST_DIR}")
-        add_executable(${Pioasm_TARGET} IMPORTED)
-    endif()
-    set_property(TARGET ${Pioasm_TARGET} PROPERTY IMPORTED_LOCATION
-            ${Pioasm_EXECUTABLE})
+    add_executable(${pioasm_TARGET} IMPORTED GLOBAL)
+    set_property(TARGET ${pioasm_TARGET} PROPERTY IMPORTED_LOCATION
+            ${pioasm_EXECUTABLE})
 
-#    message("EXE is ${Pioasm_EXECUTABLE}")
-    add_dependencies(${Pioasm_TARGET} ${PioasmBuild_TARGET})
-    set(Pioasm_FOUND 1)
+    add_dependencies(${pioasm_TARGET} ${pioasmBuild_TARGET})
 endif()

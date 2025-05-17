@@ -62,25 +62,16 @@ void keyboard_activity_trigger(void) {
 
 // Check if we should enter low power mode
 void power_management_task(void) {
-    if (is_usb_suspended) {
-        // Already in a low power state managed by suspend_power_down_kb()
-        // which uses WFI. No need for deeper MCU sleep here as USB connection is active.
-        return;
-    }
-
     uint32_t elapsed_since_activity = timer_elapsed32(last_activity_time);
 
-    if (is_deep_sleep_enabled && !in_low_power_mode && elapsed_since_activity > DEEP_SLEEP_TIMEOUT) {
+    // Check for deep sleep first, as it's the deeper state and can be entered from any other state (active, light low power, or USB suspended)
+    if (is_deep_sleep_enabled && elapsed_since_activity > DEEP_SLEEP_TIMEOUT) {
         // Entering deep sleep (dormant mode)
-        if (get_backlight_level() > 0) {
+        if (get_backlight_level() > 0) { // Ensure backlight is off before sleep
             backlight_level(0);
         }
         trackpad_sleep(); // Ensure trackpad IC is powered down via its shutdown pin
 
-        // Configure WAKEUP_PIN (GP22 / pin_TP_MOTION) for wake
-        // GPIO is initialized in trackpad.c as input with pull-up.
-        // We need to enable it for dormant wake on falling edge (button press).
-        
         // Prepare clocks for dormant mode (run from XOSC)
         sleep_run_from_xosc(); 
         
@@ -89,20 +80,20 @@ void power_management_task(void) {
         sleep_goto_dormant_until_pin(WAKEUP_PIN, true, false); // true for edge, false for low (falling edge)
         
         // Code below this point in this function will not be reached if sleep_goto_dormant_until_pin reboots.
-        // RP2040 will restart, running main(), keyboard_init(), keyboard_post_init_user().
-
-    } else if (!in_low_power_mode && elapsed_since_activity > LOW_POWER_TIMEOUT) {
+    } 
+    // Else, if not going into deep sleep, consider light low power mode
+    // This mode is only entered if USB is NOT suspended (as suspend_power_down_kb handles initial USB suspend state)
+    // and if not already in a light low power mode.
+    else if (!is_usb_suspended && !in_low_power_mode && elapsed_since_activity > LOW_POWER_TIMEOUT) {
         // Entering light low power mode (turn off backlight, trackpad IC sleep)
         in_low_power_mode = true;
         if (get_backlight_level() > 0) {
             backlight_level(0);
         }
         trackpad_sleep(); // Use the existing trackpad_sleep which handles its shutdown pin
-    } else if (in_low_power_mode && elapsed_since_activity <= LOW_POWER_TIMEOUT) {
-        // Activity detected while in light low power mode, wake up from light low power
-        // This case is largely handled by keyboard_activity_trigger(), but explicit check here for clarity.
-        // keyboard_activity_trigger() should have already set in_low_power_mode = false.
     }
+    // Note: Waking from light low power mode (when in_low_power_mode is true and activity occurs)
+    // is handled by keyboard_activity_trigger(), which sets in_low_power_mode = false and restores backlight.
 }
 
 void keyboard_post_init_user(void) {
@@ -114,7 +105,12 @@ void keyboard_post_init_user(void) {
     // USB requires PLL_USB to be active and providing 48MHz. SYS clock can be independent.
     set_sys_clock_khz(96000, true); // Set sys clock to 96MHz. Second param `true` means update UART too.
 
-    keyboard_activity_trigger(); // Initialize activity timer and power mode state
+    // Restore backlight to its persisted state after waking from dormant sleep (which involves a reboot)
+    uint8_t persisted_level = eeconfig_read_backlight(); // Reads the level from EEPROM
+    backlight_level(persisted_level); // Set backlight to this level. If 0, it turns/keeps it off.
+
+    keyboard_activity_trigger(); // Initialize activity timer and ensure power mode state is set to active.
+                                 // `in_low_power_mode` will be false (due to global variable initialization on reboot).
 }
 
 bool process_record_kb(uint16_t keycode, keyrecord_t *record) {

@@ -29,7 +29,7 @@ static bool is_deep_sleep_enabled = true; // Enable deep sleep by default
 // but all column pins will be configured to trigger wake-up.
 // #define WAKEUP_PIN GP22 // This is pin_TP_MOTION from trackpad.c
 // #define WAKEUP_PIN GP8 // Changed to a keyboard matrix column pin
-#define WAKEUP_PIN GP8 // Corrected to the actual COL1 (GP8) based on schematic
+#define WAKEUP_PIN GP9 // Corrected to the actual COL2 (GP9) based on schematic
 
 // Track backlight state - No longer needed, QMK handles this
 // static bool backlight_was_on = true; 

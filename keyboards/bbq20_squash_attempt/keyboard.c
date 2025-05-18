@@ -25,8 +25,11 @@ bool is_usb_suspended = false;  // Made global so trackpad.c can access it
 #define DEEP_SLEEP_TIMEOUT 60000 // 60 seconds for MCU deep sleep
 static bool is_deep_sleep_enabled = true; // Enable deep sleep by default
 
-// Pin for waking from deep sleep (Trackpad Motion/Button Pin)
-#define WAKEUP_PIN GP22 // This is pin_TP_MOTION from trackpad.c
+// Pin for waking from deep sleep (Trackpad Motion/Button Pin) - This will be the pin passed to sleep_goto_dormant_until_pin,
+// but all column pins will be configured to trigger wake-up.
+// #define WAKEUP_PIN GP22 // This is pin_TP_MOTION from trackpad.c
+// #define WAKEUP_PIN GP8 // Changed to a keyboard matrix column pin
+#define WAKEUP_PIN GP8 // Corrected to the actual COL1 (GP8) based on schematic
 
 // Track backlight state - No longer needed, QMK handles this
 // static bool backlight_was_on = true; 
@@ -72,14 +75,33 @@ void power_management_task(void) {
         }
         trackpad_sleep(); // Ensure trackpad IC is powered down via its shutdown pin
 
+        // Define column pins for wake-up based on MATRIX_COL_PINS from bbq20_pins.h
+        // MATRIX_COL_PINS is an initializer list like { GP15, GP14, ... }
+        // We need to create an actual array from it.
+        static const uint8_t wake_column_pins[] = MATRIX_COL_PINS;
+        static const uint8_t num_wake_columns = sizeof(wake_column_pins) / sizeof(wake_column_pins[0]);
+
+        // Configure all column pins to wake the device on a falling edge
+        for (uint8_t i = 0; i < num_wake_columns; ++i) {
+            uint8_t pin = wake_column_pins[i];
+            gpio_init(pin);
+            gpio_set_dir(pin, GPIO_IN);
+            gpio_pull_up(pin);
+            // Enable dormant IRQ on falling edge for this pin
+            // GPIO_IRQ_EDGE_FALL is equivalent to (true, false) in sleep_goto_dormant_until_pin
+            gpio_set_dormant_irq_enabled(pin, GPIO_IRQ_EDGE_FALL, true);
+        }
+
         // Prepare clocks for dormant mode (run from XOSC)
         sleep_run_from_xosc(); 
         
-        // Go dormant until a falling edge on WAKEUP_PIN
-        // This function stops execution here. On wake, RP2040 reboots.
+        // Go dormant. Any of the configured column pins can now wake the device.
+        // We pass WAKEUP_PIN (the first column pin) as the nominal pin to sleep_goto_dormant_until_pin.
+        // This function handles the low-level sleep details and ensures a reboot on wake.
         sleep_goto_dormant_until_pin(WAKEUP_PIN, true, false); // true for edge, false for low (falling edge)
         
         // Code below this point in this function will not be reached if sleep_goto_dormant_until_pin reboots.
+        // Upon reboot, GPIOs are reset, so explicit cleanup of dormant IRQs here is not strictly necessary.
     } 
     // Else, if not going into deep sleep, consider light low power mode
     // This mode is only entered if USB is NOT suspended (as suspend_power_down_kb handles initial USB suspend state)
@@ -108,6 +130,9 @@ void keyboard_post_init_user(void) {
     // Restore backlight to its persisted state after waking from dormant sleep (which involves a reboot)
     uint8_t persisted_level = eeconfig_read_backlight(); // Reads the level from EEPROM
     backlight_level(persisted_level); // Set backlight to this level. If 0, it turns/keeps it off.
+    // MODIFICATION: Do not automatically turn on backlight after dormant wake.
+    // It will be restored by keyboard_activity_trigger() upon first actual key press or trackpad activity.
+    // REVERTED: User wants backlight on after deep sleep wake for testing.
 
     keyboard_activity_trigger(); // Initialize activity timer and ensure power mode state is set to active.
                                  // `in_low_power_mode` will be false (due to global variable initialization on reboot).

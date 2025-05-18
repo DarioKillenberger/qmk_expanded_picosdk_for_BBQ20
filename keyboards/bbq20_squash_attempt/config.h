@@ -3,7 +3,11 @@
 
 #pragma once
 
+#include "bbq20_pins.h" // Include all pin definitions
+
 #define PICO_CLK_SYS_MHZ 48
+
+#define DIODE_DIRECTION ROW2COL // Diodes are anode on row, cathode on column
 
 #define DEBOUNCE 10                                 // Reduce debounce time to save power
 
@@ -11,7 +15,7 @@
 #define I2C_DRIVER I2CD1
 #define I2C1_SCL_PIN GP23
 #define I2C1_SDA_PIN GP18
-#define I2C1_CLOCK_SPEED 40000                     // Further reduced from 50000 to save more power
+#define I2C1_CLOCK_SPEED 100000                     // Further reduced from 50000 to save more power
 #define I2C_USE_FAST_MODE false                    // Disable fast mode to save power
 
 #define RP2040_BOOTLOADER_DOUBLE_TAP_RESET
@@ -45,5 +49,5 @@
 #define POINTING_DEVICE_INVERT_Y
 
 // Backlight settings for power saving
-#define BACKLIGHT_LIMIT_VAL 50 // Limit backlight brightness
+#define BACKLIGHT_LIMIT_VAL 100 // Limit backlight brightness (Increased from 50)
 // Ensure breathing is off for power saving (by not defining BACKLIGHT_BREATHING)

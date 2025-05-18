@@ -53,14 +53,14 @@ bool is_trackpad_button_pressed(void) {
 
 void trackpad_sleep(void) {
     if (trackpad_enabled) {
-        writePinLow(pin_TP_SHUTDOWN);
+        writePinHigh(pin_TP_SHUTDOWN);
         trackpad_enabled = false;
     }
 }
 
 void trackpad_wake(void) {
     if (!trackpad_enabled) {
-        writePinHigh(pin_TP_SHUTDOWN);
+        writePinLow(pin_TP_SHUTDOWN);
         wait_ms(10);
         writePinLow(pin_TP_RESET);
         wait_ms(100);
@@ -77,12 +77,17 @@ void pointing_device_init(void) {
     i2c_init();
     wait_ms(10);
 
+    // Enable peripheral power
+    setPinOutput(BBQ20_PERIPH_POWER_PIN);
+    writePinLow(BBQ20_PERIPH_POWER_PIN);  // Correct: This turns ON the P-channel MOSFET, supplying power to the LDO
+    wait_ms(10); // Give power some time to stabilize
+
     setPinOutput(pin_TP_SHUTDOWN);
     setPinInputHigh(pin_TP_MOTION);
     setPinOutput(pin_TP_RESET);
     
-    // Start with trackpad in sleep mode
-    trackpad_sleep();
+    // Start with trackpad active
+    trackpad_wake();
 }
 
 // Read a single byte from register

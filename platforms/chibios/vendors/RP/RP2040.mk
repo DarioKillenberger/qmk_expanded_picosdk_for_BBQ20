@@ -47,7 +47,8 @@ PICOSDKSRC     = $(PICOSDKROOT)/src/rp2_common/hardware_clocks/clocks.c \
                  $(PICOSDKROOT)/src/rp2_common/pico_runtime_init/runtime_init.c \
                  $(PICOSDKROOT)/src/rp2_common/pico_runtime_init/runtime_init_clocks.c \
                  $(PICOSDKROOT)/src/rp2_common/pico_runtime_init/runtime_init_stack_guard.c \
-                 $(PICOSDKROOT)/src/rp2_common/pico_stdlib/stdlib.c
+                 $(PICOSDKROOT)/src/rp2_common/pico_stdlib/stdlib.c \
+                 $(PICOSDKROOT)/src/rp2_common/pico_stdio/stdio.c
 
 PICOSDKINC     = $(CHIBIOS)//os/various/pico_bindings/dumb/include \
                  $(PICOSDKROOT)/src/common/pico_base_headers/include \

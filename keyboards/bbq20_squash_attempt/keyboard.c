@@ -9,6 +9,7 @@
 
 // Pico SDK includes for deep sleep and clock control
 #include "pico/stdlib.h" // Provides set_sys_clock_khz and other std utilities
+#include "pico/stdio.h"  // For stdio_init_all()
 #include "pico/sleep.h"
 #include "hardware/clocks.h" // Likely made redundant by pico/stdlib.h
 #include "hardware/gpio.h" // Already included by QMK wrappers, but good for clarity
@@ -90,6 +91,16 @@ void power_management_task(void) {
             // Enable dormant IRQ on falling edge for this pin
             // GPIO_IRQ_EDGE_FALL is equivalent to (true, false) in sleep_goto_dormant_until_pin
             gpio_set_dormant_irq_enabled(pin, GPIO_IRQ_EDGE_FALL, true);
+        }
+
+        // Configure ROW pins to be low to allow columns to be pulled low for wake-up
+        static const uint8_t row_pins_for_sleep[] = MATRIX_ROW_PINS;
+        static const uint8_t num_row_pins_for_sleep = sizeof(row_pins_for_sleep) / sizeof(row_pins_for_sleep[0]);
+        for (uint8_t i = 0; i < num_row_pins_for_sleep; ++i) {
+            uint8_t pin = row_pins_for_sleep[i];
+            gpio_init(pin);
+            gpio_set_dir(pin, GPIO_OUT);
+            gpio_put(pin, 0); // Drive row pin low
         }
 
         // Prepare clocks for dormant mode (run from XOSC)

@@ -52,18 +52,19 @@ static bool is_deep_sleep_enabled = true; // Enable deep sleep by default
 void keyboard_activity_trigger(void) {
     last_activity_time = timer_read32();
     // Only perform power mode transition if needed
+    backlight_level(5);
     if (in_low_power_mode) {
         in_low_power_mode = false;
         // Restore backlight if it was on before low power mode
         // Check the persisted EEPROM state for backlight level.
-        uint8_t persisted_level = eeconfig_read_backlight(); // Assuming this returns the level
-        if (get_backlight_level() == 0 && persisted_level > 0) { 
-             backlight_level(persisted_level); // Restore to persisted level
-        } else if (get_backlight_level() > 0) {
+        // uint8_t persisted_level = eeconfig_read_backlight(); // Assuming this returns the level
+        // if (get_backlight_level() == 0 && persisted_level > 0) { 
+        //      backlight_level(persisted_level); // Restore to persisted level
+        // } else if (get_backlight_level() > 0) {
             // If it's already on (e.g. user turned it on manually during low power), leave it.
             // Or, if persisted_level was 0 but it's on, respect current state.
             // Essentially, if backlight is off AND it should be on, turn it to persisted level.
-        }
+        backlight_enable();
     }
 }
 
@@ -71,18 +72,26 @@ void keyboard_activity_trigger(void) {
 void power_management_task(void) {
     uint32_t elapsed_since_activity = timer_elapsed32(last_activity_time);
 
+    // for (int i = 0; i < 9; i++) {
+    //         backlight_toggle();
+    //         wait_ms(150);
+    //         backlight_toggle();
+    //         wait_ms(150);
+    //     }
+
     // Check for deep sleep first, as it's the deeper state and can be entered from any other state (active, light low power, or USB suspended)
     if (is_deep_sleep_enabled && elapsed_since_activity > DEEP_SLEEP_TIMEOUT) {
         // Entering deep sleep (dormant mode)
-        if (get_backlight_level() > 0) { // Ensure backlight is off before sleep
-            backlight_level(0);
-        }
-        trackpad_sleep(); // Ensure trackpad IC is powered down via its shutdown pin
+        backlight_toggle();
+        wait_ms(1050);
+        backlight_toggle();
+        wait_ms(1050);
+        backlight_toggle();
+        wait_ms(1050);
+        backlight_toggle();
+        // trackpad_sleep(); // Ensure trackpad IC is powered down via its shutdown pin
 
-        // Define column pins for wake-up based on MATRIX_COL_PINS from bbq20_pins.h
-        // MATRIX_COL_PINS is an initializer list like { GP15, GP14, ... }
-        // We need to create an actual array from it.
-        static const uint8_t wake_column_pins[] = MATRIX_COL_PINS;
+         static const uint8_t wake_column_pins[] = MATRIX_COL_PINS;
         static const uint8_t num_wake_columns = sizeof(wake_column_pins) / sizeof(wake_column_pins[0]);
 
         // Configure all column pins to wake the device on a falling edge
@@ -107,43 +116,124 @@ void power_management_task(void) {
         }
 
         // Prepare clocks for dormant mode (run from XOSC)
-        sleep_run_from_xosc(); 
+        // sleep_run_from_xosc(); //TEMP DISABLED
         
         // Go dormant. Any of the configured column pins can now wake the device.
         // We pass WAKEUP_PIN (the first column pin) as the nominal pin to sleep_goto_dormant_until_pin.
         // This function handles the low-level sleep details.
         // CRITICAL ASSUMPTION: This function RESUMES execution here, does NOT reboot.
         sleep_goto_dormant_until_pin(WAKEUP_PIN, true, false); // true for edge, false for low (falling edge)
-        
-        // ---- CODE REACHED ON RESUME FROM DORMANT SLEEP ----
-        
-        // 1. Re-initialize system clocks. USB LLD might depend on these.
-        //    set_sys_clock_khz also re-inits stdio_uart if the second param is true.
-        set_sys_clock_khz(96000, true);
 
-        // 2. Re-initialize USB driver
-        //    USB_DRIVER is defined in protocol/chibios/usb_main.h (usually USBD1)
-        //    restart_usb_driver handles stopping, reconfiguring, and restarting the USB stack.
-        // #if HAL_USE_USB
-        // dprintf("Resumed from dormant. Restarting USB driver.\n"); // For debugging if dprintf is set up
-        restart_usb_driver(&USB_DRIVER);
-        // #endif
+        reset_keyboard();
 
-        // 3. Reset power management state and activity timer
-        keyboard_activity_trigger(); // This will also try to restore backlight based on persisted level
-                                     // if it thinks it was in low power mode.
-        in_low_power_mode = false;   // Explicitly ensure we are not in low power mode.
+        keyboard_activity_trigger();
 
-        // 4. Explicitly restore backlight if keyboard_activity_trigger didn't (e.g. if persisted level was 0)
-        //    or if keyboard_activity_trigger's logic isn't sufficient for resume.
-        //    keyboard_activity_trigger turns backlight on if it was off AND persisted > 0
-        //    This is redundant if keyboard_activity_trigger already handled it, but ensures it.
-        uint8_t persisted_level = eeconfig_read_backlight();
-        if (get_backlight_level() == 0 && persisted_level > 0) {
-            backlight_level(persisted_level);
-        } else if (get_backlight_level() > 0) {
-            // If already on (perhaps keyboard_activity_trigger did it), leave it.
+       
+
+        // --- Restore pins after waking from sleep ---
+        static const uint8_t wake_column_pins_v2[] = MATRIX_COL_PINS;
+        static const uint8_t num_wake_columns_v2 = sizeof(wake_column_pins_v2) / sizeof(wake_column_pins_v2[0]);
+        static const uint8_t row_pins_for_sleep_v2[] = MATRIX_ROW_PINS;
+        static const uint8_t num_row_pins_for_sleep_v2 = sizeof(row_pins_for_sleep_v2) / sizeof(row_pins_for_sleep_v2[0]);
+        // Restore COLUMN pins to normal operation.
+        // This assumes 'wake_column_pins' and 'num_wake_columns' (used in the pre-sleep setup) 
+        // are still in scope and hold the correct definitions for the column pins.
+        for (uint8_t i = 0; i < num_wake_columns_v2; ++i) {
+            uint8_t pin = wake_column_pins_v2[i];
+            // Disable the dormant IRQ that was enabled for wakeup.
+            gpio_set_dormant_irq_enabled(pin, GPIO_IRQ_EDGE_FALL, false);
+            
+            // Re-initialize the pin to the standard QMK state for columns.
+            gpio_init(pin);
+            gpio_set_dir(pin, GPIO_IN);
+            gpio_pull_up(pin); // Columns are typically inputs with pull-ups.
         }
+
+        // Restore ROW pins to normal operation.
+        // This assumes 'row_pins_for_sleep' and 'num_row_pins_for_sleep' (used in the pre-sleep setup,
+        // typically derived from MATRIX_ROW_PINS) are still in scope and correct.
+        for (uint8_t i = 0; i < num_row_pins_for_sleep_v2; ++i) {
+            uint8_t pin = row_pins_for_sleep_v2[i];
+            
+            // Reset the pin to its default GPIO state. 
+            // QMK's matrix_init() or the matrix_scan() routine will then configure it 
+            // as an output and set its level appropriately during the matrix scan.
+            gpio_init(pin);
+        }
+
+        // Optional: If QMK's matrix initialization isn't automatically run after wakeup,
+        // or if you want to ensure a full re-initialization, you might need to call it here.
+        // For example:
+        // matrix_init(); 
+
+        backlight_toggle();
+        wait_ms(100);
+        backlight_toggle();
+        wait_ms(1000);
+        backlight_toggle();
+        wait_ms(100);
+        backlight_toggle();
+        wait_ms(1000);
+        backlight_toggle();
+        wait_ms(100);
+        backlight_toggle();
+        
+        // // ---- CODE REACHED ON RESUME FROM DORMANT SLEEP ----
+        // for (int i = 0; i < 5; i++) {
+        //     backlight_level(5);
+        //     wait_ms(150);
+        //     backlight_level(0);
+        //     wait_ms(150);
+        // }
+
+        // set_sys_clock_khz(96000, true);
+
+        // for (int i = 0; i < 4; i++) {
+        //     backlight_level(5);
+        //     wait_ms(150);
+        //     backlight_level(0);
+        //     wait_ms(150);
+        // }
+        // // 1. Re-initialize system clocks. USB LLD might depend on these.
+        // //    set_sys_clock_khz also re-inits stdio_uart if the second param is true.
+        // // restart_usb_driver(&USB_DRIVER);
+
+    
+        // for (int i = 0; i < 3; i++) {
+        //     backlight_level(5);
+        //     sleep_ms(100);
+        //     backlight_level(0);
+        //     sleep_ms(100);
+        // }
+        // // 2. Re-initialize USB driver
+        // //    USB_DRIVER is defined in protocol/chibios/usb_main.h (usually USBD1)
+        // //    restart_usb_driver handles stopping, reconfiguring, and restarting the USB stack.
+        // // #if HAL_USE_USB
+        // // dprintf("Resumed from dormant. Restarting USB driver.\n"); // For debugging if dprintf is set up
+        
+        // // #endif
+
+        // // 3. Reset power management state and activity timer
+        // keyboard_activity_trigger(); // This will also try to restore backlight based on persisted level
+        //                              // if it thinks it was in low power mode.
+        // in_low_power_mode = false;   // Explicitly ensure we are not in low power mode.
+
+        // for (int i = 0; i < 2; i++) {
+        //     backlight_level(5);
+        //     sleep_ms(100);
+        //     backlight_level(0);
+        //     sleep_ms(100);
+        // }
+        // // 4. Explicitly restore backlight if keyboard_activity_trigger didn't (e.g. if persisted level was 0)
+        // //    or if keyboard_activity_trigger's logic isn't sufficient for resume.
+        // //    keyboard_activity_trigger turns backlight on if it was off AND persisted > 0
+        // //    This is redundant if keyboard_activity_trigger already handled it, but ensures it.
+        // uint8_t persisted_level = eeconfig_read_backlight();
+        // if (get_backlight_level() == 0 && persisted_level > 0) {
+        //     backlight_level(persisted_level);
+        // } else if (get_backlight_level() > 0) {
+        //     // If already on (perhaps keyboard_activity_trigger did it), leave it.
+        // }
         // If persisted_level is 0, it remains off.
 
         // GPIOs used for dormant wake IRQ should be reset to their normal function
@@ -161,33 +251,44 @@ void power_management_task(void) {
     else if (!is_usb_suspended && !in_low_power_mode && elapsed_since_activity > LOW_POWER_TIMEOUT) {
         // Entering light low power mode (turn off backlight, trackpad IC sleep)
         in_low_power_mode = true;
-        if (get_backlight_level() > 0) {
-            backlight_level(0);
-        }
-        trackpad_sleep(); // Use the existing trackpad_sleep which handles its shutdown pin
+        // if (get_backlight_level() > 0) {
+        //     backlight_level(0);
+        // }
+        // trackpad_sleep(); // Use the existing trackpad_sleep which handles its shutdown pin
     }
     // Note: Waking from light low power mode (when in_low_power_mode is true and activity occurs)
     // is handled by keyboard_activity_trigger(), which sets in_low_power_mode = false and restores backlight.
 }
 
 void keyboard_post_init_user(void) {
-    // If waking from dormant sleep, clocks need to be reinitialized.
-    // The RP2040 SDK's clocks_init() is usually called very early in boot by crt0 or similar.
-    // QMK's ChibiOS port for RP2040 likely handles this standard init.
-    // Forcing set_sys_clock_khz re-configures, ensuring a known state.
-    // Set system clock to a lower speed for power saving, e.g., 96 MHz.
-    // USB requires PLL_USB to be active and providing 48MHz. SYS clock can be independent.
-    set_sys_clock_khz(96000, true); // Set sys clock to 96MHz. Second param `true` means update UART too.
+//     // If waking from dormant sleep, clocks need to be reinitialized.
+//     // The RP2040 SDK's clocks_init() is usually called very early in boot by crt0 or similar.
+//     // QMK's ChibiOS port for RP2040 likely handles this standard init.
+//     // Forcing set_sys_clock_khz re-configures, ensuring a known state.
+//     // Set system clock to a lower speed for power saving, e.g., 96 MHz.
+//     // USB requires PLL_USB to be active and providing 48MHz. SYS clock can be independent.
+//     set_sys_clock_khz(96000, true); // Set sys clock to 96MHz. Second param `true` means update UART too.
 
-    // Restore backlight to its persisted state after waking from dormant sleep (which involves a reboot)
-    uint8_t persisted_level = eeconfig_read_backlight(); // Reads the level from EEPROM
-    backlight_level(persisted_level); // Set backlight to this level. If 0, it turns/keeps it off.
-    // MODIFICATION: Do not automatically turn on backlight after dormant wake.
-    // It will be restored by keyboard_activity_trigger() upon first actual key press or trackpad activity.
-    // REVERTED: User wants backlight on after deep sleep wake for testing.
+//     // Restore backlight to its persisted state after waking from dormant sleep (which involves a reboot)
+//     uint8_t persisted_level = eeconfig_read_backlight(); // Reads the level from EEPROM
+//     backlight_level(persisted_level); // Set backlight to this level. If 0, it turns/keeps it off.
+//     // MODIFICATION: Do not automatically turn on backlight after dormant wake.
+//     // It will be restored by keyboard_activity_trigger() upon first actual key press or trackpad activity.
+//     // REVERTED: User wants backlight on after deep sleep wake for testing.
 
-    keyboard_activity_trigger(); // Initialize activity timer and ensure power mode state is set to active.
-                                 // `in_low_power_mode` will be false (due to global variable initialization on reboot).
+//     keyboard_activity_trigger(); // Initialize activity timer and ensure power mode state is set to active.
+//      
+    backlight_toggle();
+    wait_ms(150);
+    backlight_toggle();
+    wait_ms(150);
+                                    // `in_low_power_mode` will be false (due to global variable initialization on reboot).
+    // for (int i = 0; i < 8; i++) {
+    //     backlight_toggle();
+    //     wait_ms(150);
+    //     backlight_toggle();
+    //     wait_ms(150);
+    // }
 }
 
 bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
@@ -198,32 +299,44 @@ bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
     return process_record_user(keycode, record);
 }
 
-void housekeeping_task_user(void) {
+void housekeeping_task_kb(void) {
+    // wait_ms(1050);
+    // backlight_toggle();
+    // wait_ms(150);
+    // backlight_toggle();
+    // wait_ms(150);
+    // backlight_toggle();
+    // wait_ms(150);
+    // backlight_toggle();
+    // wait_ms(150);
+    // backlight_toggle();
+    // wait_ms(150);
+    // backlight_toggle();
     // Check if we should enter low power mode
     power_management_task();
 }
 
 // Detect USB suspend state and adjust power accordingly
-void suspend_power_down_kb(void) {
-    is_usb_suspended = true;
-    // trackpad.c's pointing_device_task checks is_usb_suspended and calls trackpad_sleep() if needed.
-    // No need to call trackpad_sleep() directly here, to avoid potential race or double calls.
-    if (!in_low_power_mode) { // Avoid redundant operations if already in low power from inactivity
-        in_low_power_mode = true; // Set low power mode state
-        if (get_backlight_level() > 0) {
-            backlight_level(0);
-        }
-        // trackpad_sleep(); // Removed, handled by trackpad.c itself based on is_usb_suspended
-    }
-    suspend_power_down_user();
-}
+// void suspend_power_down_kb(void) {
+//     is_usb_suspended = true;
+//     // trackpad.c's pointing_device_task checks is_usb_suspended and calls trackpad_sleep() if needed.
+//     // No need to call trackpad_sleep() directly here, to avoid potential race or double calls.
+//     if (!in_low_power_mode) { // Avoid redundant operations if already in low power from inactivity
+//         in_low_power_mode = true; // Set low power mode state
+//         if (get_backlight_level() > 0) {
+//             backlight_level(0);
+//         }
+//         // trackpad_sleep(); // Removed, handled by trackpad.c itself based on is_usb_suspended
+//     }
+//     suspend_power_down_user();
+// }
 
-// Wake up from USB suspend
-void suspend_wakeup_init_kb(void) {
-    is_usb_suspended = false;
-    // Clocks should be fine as USB suspend isn't as deep as dormant.
-    // Re-initialize sys clock to our desired frequency, in case it was changed.
-    set_sys_clock_khz(96000, true);
-    keyboard_activity_trigger(); 
-    suspend_wakeup_init_user();
-} 
+// // Wake up from USB suspend
+// void suspend_wakeup_init_kb(void) {
+//     is_usb_suspended = false;
+//     // Clocks should be fine as USB suspend isn't as deep as dormant.
+//     // Re-initialize sys clock to our desired frequency, in case it was changed.
+//     set_sys_clock_khz(96000, true);
+//     keyboard_activity_trigger(); 
+//     suspend_wakeup_init_user();
+// } 

@@ -11,7 +11,7 @@
 
 #define DEBOUNCE 10                                 // Reduce debounce time to save power
 
-
+#define USB_MAX_POWER_CONSUMPTION 100
 #define I2C_DRIVER I2CD1
 #define I2C1_SCL_PIN GP23
 #define I2C1_SDA_PIN GP18

@@ -91,19 +91,19 @@ void power_management_task(void) {
         backlight_toggle();
         // trackpad_sleep(); // Ensure trackpad IC is powered down via its shutdown pin
 
-         static const uint8_t wake_column_pins[] = MATRIX_COL_PINS;
-        static const uint8_t num_wake_columns = sizeof(wake_column_pins) / sizeof(wake_column_pins[0]);
+        //  static const uint8_t wake_column_pins[] = MATRIX_COL_PINS;
+        // static const uint8_t num_wake_columns = sizeof(wake_column_pins) / sizeof(wake_column_pins[0]);
 
-        // Configure all column pins to wake the device on a falling edge
-        for (uint8_t i = 0; i < num_wake_columns; ++i) {
-            uint8_t pin = wake_column_pins[i];
-            gpio_init(pin);
-            gpio_set_dir(pin, GPIO_IN);
-            gpio_pull_up(pin);
-            // Enable dormant IRQ on falling edge for this pin
-            // GPIO_IRQ_EDGE_FALL is equivalent to (true, false) in sleep_goto_dormant_until_pin
-            gpio_set_dormant_irq_enabled(pin, GPIO_IRQ_EDGE_FALL, true);
-        }
+        // // Configure all column pins to wake the device
+        // // Temporarily disabled to test wake-up with only WAKEUP_PIN configured by sleep_goto_dormant_until_pin
+        // for (uint8_t i = 0; i < num_wake_columns; ++i) {
+        //     uint8_t pin = wake_column_pins[i];
+        //     gpio_init(pin);
+        //     gpio_set_dir(pin, GPIO_IN);
+        //     gpio_pull_up(pin);
+        //     // Change to wake on level low
+        //     gpio_set_dormant_irq_enabled(pin, GPIO_IRQ_LEVEL_LOW, true);
+        // }
 
         // Configure ROW pins to be low to allow columns to be pulled low for wake-up
         static const uint8_t row_pins_for_sleep[] = MATRIX_ROW_PINS;
@@ -116,60 +116,59 @@ void power_management_task(void) {
         }
 
         // Prepare clocks for dormant mode (run from XOSC)
-        // sleep_run_from_xosc(); //TEMP DISABLED
+        sleep_run_from_xosc(); // Ensure XOSC is running and sys_clk is switched for dormant mode
         
         // Go dormant. Any of the configured column pins can now wake the device.
         // We pass WAKEUP_PIN (the first column pin) as the nominal pin to sleep_goto_dormant_until_pin.
         // This function handles the low-level sleep details.
         // CRITICAL ASSUMPTION: This function RESUMES execution here, does NOT reboot.
-        sleep_goto_dormant_until_pin(WAKEUP_PIN, true, false); // true for edge, false for low (falling edge)
+        // sleep_goto_dormant_until_pin(WAKEUP_PIN, true, false); // Original: true for edge, false for low (falling edge)
+        // sleep_goto_dormant_until_pin(WAKEUP_PIN, false, false); // Changed: false for level, false for low (low level) - Did not wake
+        sleep_goto_dormant_until_pin(WAKEUP_PIN, true, false); // Reverted to FALLING EDGE for WAKEUP_PIN only
 
-        reset_keyboard();
-
-        keyboard_activity_trigger();
+        // reset_keyboard();
 
        
 
         // --- Restore pins after waking from sleep ---
-        static const uint8_t wake_column_pins_v2[] = MATRIX_COL_PINS;
-        static const uint8_t num_wake_columns_v2 = sizeof(wake_column_pins_v2) / sizeof(wake_column_pins_v2[0]);
+        // It's crucial to disable the dormant IRQs and reconfigure pins for normal operation.
+        // static const uint8_t wake_column_pins_v2[] = MATRIX_COL_PINS;
+        // static const uint8_t num_wake_columns_v2 = sizeof(wake_column_pins_v2) / sizeof(wake_column_pins_v2[0]);
         static const uint8_t row_pins_for_sleep_v2[] = MATRIX_ROW_PINS;
         static const uint8_t num_row_pins_for_sleep_v2 = sizeof(row_pins_for_sleep_v2) / sizeof(row_pins_for_sleep_v2[0]);
+        
         // Restore COLUMN pins to normal operation.
-        // This assumes 'wake_column_pins' and 'num_wake_columns' (used in the pre-sleep setup) 
-        // are still in scope and hold the correct definitions for the column pins.
-        for (uint8_t i = 0; i < num_wake_columns_v2; ++i) {
-            uint8_t pin = wake_column_pins_v2[i];
-            // Disable the dormant IRQ that was enabled for wakeup.
-            gpio_set_dormant_irq_enabled(pin, GPIO_IRQ_EDGE_FALL, false);
-            
-            // Re-initialize the pin to the standard QMK state for columns.
-            gpio_init(pin);
-            gpio_set_dir(pin, GPIO_IN);
-            gpio_pull_up(pin); // Columns are typically inputs with pull-ups.
-        }
+        // // Temporarily disabled as the setup loop is also disabled.
+        // // Moreover, sleep_goto_dormant_until_pin handles disabling IRQ for WAKEUP_PIN,
+        // // and reset_keyboard() will lead to QMK's matrix_init().
+        // for (uint8_t i = 0; i < num_wake_columns_v2; ++i) {
+        //     uint8_t pin = wake_column_pins_v2[i];
+        //     // Disable the dormant IRQ that was enabled for wakeup.
+        //     gpio_set_dormant_irq_enabled(pin, GPIO_IRQ_LEVEL_LOW, false);
+        //     
+        //     // Re-initialize the pin to the standard QMK state for columns.
+        //     // QMK's matrix_init after reset_keyboard() should handle this.
+        //     // gpio_init(pin);
+        //     // gpio_set_dir(pin, GPIO_IN);
+        //     // gpio_pull_up(pin); 
+        // }
 
         // Restore ROW pins to normal operation.
-        // This assumes 'row_pins_for_sleep' and 'num_row_pins_for_sleep' (used in the pre-sleep setup,
-        // typically derived from MATRIX_ROW_PINS) are still in scope and correct.
         for (uint8_t i = 0; i < num_row_pins_for_sleep_v2; ++i) {
             uint8_t pin = row_pins_for_sleep_v2[i];
             
             // Reset the pin to its default GPIO state. 
             // QMK's matrix_init() or the matrix_scan() routine will then configure it 
             // as an output and set its level appropriately during the matrix scan.
-            gpio_init(pin);
+            gpio_init(pin); // QMK's matrix scanning will set direction and state.
         }
+        
+        // Trigger activity to reset timers and potentially turn backlight on.
+        // This should come after pins are restored to ensure proper hardware state.
+        keyboard_activity_trigger();
 
-        // Optional: If QMK's matrix initialization isn't automatically run after wakeup,
-        // or if you want to ensure a full re-initialization, you might need to call it here.
-        // For example:
-        // matrix_init(); 
+        // runtime_init_bootrom_reset();
 
-        backlight_toggle();
-        wait_ms(100);
-        backlight_toggle();
-        wait_ms(1000);
         backlight_toggle();
         wait_ms(100);
         backlight_toggle();
@@ -260,7 +259,7 @@ void power_management_task(void) {
     // is handled by keyboard_activity_trigger(), which sets in_low_power_mode = false and restores backlight.
 }
 
-void keyboard_post_init_user(void) {
+void keyboard_post_init_kb(void) {
 //     // If waking from dormant sleep, clocks need to be reinitialized.
 //     // The RP2040 SDK's clocks_init() is usually called very early in boot by crt0 or similar.
 //     // QMK's ChibiOS port for RP2040 likely handles this standard init.

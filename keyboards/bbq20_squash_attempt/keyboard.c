@@ -16,6 +16,9 @@
 #include "hardware/rosc.h" // For rosc_disable, used by sleep_run_from_xosc
 #include "hardware/xosc.h" // For xosc_disable, used by sleep_run_from_rosc
 
+// Add ChibiOS USB main header for restart_usb_driver and USB_DRIVER
+#include "protocol/chibios/usb_main.h"
+
 // Last activity timestamp for power management
 static uint32_t last_activity_time = 0;
 static bool in_low_power_mode = false;
@@ -108,11 +111,49 @@ void power_management_task(void) {
         
         // Go dormant. Any of the configured column pins can now wake the device.
         // We pass WAKEUP_PIN (the first column pin) as the nominal pin to sleep_goto_dormant_until_pin.
-        // This function handles the low-level sleep details and ensures a reboot on wake.
+        // This function handles the low-level sleep details.
+        // CRITICAL ASSUMPTION: This function RESUMES execution here, does NOT reboot.
         sleep_goto_dormant_until_pin(WAKEUP_PIN, true, false); // true for edge, false for low (falling edge)
         
-        // Code below this point in this function will not be reached if sleep_goto_dormant_until_pin reboots.
-        // Upon reboot, GPIOs are reset, so explicit cleanup of dormant IRQs here is not strictly necessary.
+        // ---- CODE REACHED ON RESUME FROM DORMANT SLEEP ----
+        
+        // 1. Re-initialize system clocks. USB LLD might depend on these.
+        //    set_sys_clock_khz also re-inits stdio_uart if the second param is true.
+        set_sys_clock_khz(96000, true);
+
+        // 2. Re-initialize USB driver
+        //    USB_DRIVER is defined in protocol/chibios/usb_main.h (usually USBD1)
+        //    restart_usb_driver handles stopping, reconfiguring, and restarting the USB stack.
+        // #if HAL_USE_USB
+        // dprintf("Resumed from dormant. Restarting USB driver.\n"); // For debugging if dprintf is set up
+        restart_usb_driver(&USB_DRIVER);
+        // #endif
+
+        // 3. Reset power management state and activity timer
+        keyboard_activity_trigger(); // This will also try to restore backlight based on persisted level
+                                     // if it thinks it was in low power mode.
+        in_low_power_mode = false;   // Explicitly ensure we are not in low power mode.
+
+        // 4. Explicitly restore backlight if keyboard_activity_trigger didn't (e.g. if persisted level was 0)
+        //    or if keyboard_activity_trigger's logic isn't sufficient for resume.
+        //    keyboard_activity_trigger turns backlight on if it was off AND persisted > 0
+        //    This is redundant if keyboard_activity_trigger already handled it, but ensures it.
+        uint8_t persisted_level = eeconfig_read_backlight();
+        if (get_backlight_level() == 0 && persisted_level > 0) {
+            backlight_level(persisted_level);
+        } else if (get_backlight_level() > 0) {
+            // If already on (perhaps keyboard_activity_trigger did it), leave it.
+        }
+        // If persisted_level is 0, it remains off.
+
+        // GPIOs used for dormant wake IRQ should be reset to their normal function
+        // or re-initialized by their respective drivers if necessary.
+        // For matrix pins, the QMK matrix scan will re-initialize them.
+        // For other pins (like trackpad), ensure their drivers handle re-init if needed.
+        // The RP2040 SDK's gpio_set_dormant_irq_enabled documentation isn't explicit on cleanup needs
+        // upon resume vs reboot. Assuming for resume, pins might need manual reset if not handled by drivers.
+        // However, QMK's matrix scanning should re-init column pins.
+
     } 
     // Else, if not going into deep sleep, consider light low power mode
     // This mode is only entered if USB is NOT suspended (as suspend_power_down_kb handles initial USB suspend state)

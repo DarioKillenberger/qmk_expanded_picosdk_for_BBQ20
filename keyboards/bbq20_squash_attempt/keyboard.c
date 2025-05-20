@@ -15,9 +15,13 @@
 #include "hardware/gpio.h" // Already included by QMK wrappers, but good for clarity
 #include "hardware/rosc.h" // For rosc_disable, used by sleep_run_from_xosc
 #include "hardware/xosc.h" // For xosc_disable, used by sleep_run_from_rosc
+#include "hardware/resets.h" // For reset_block and unreset_block_wait_blocking
 
 // Add ChibiOS USB main header for restart_usb_driver and USB_DRIVER
 #include "protocol/chibios/usb_main.h"
+
+// Forward declaration for USB reset function
+void perform_full_usb_reset(void);
 
 // Last activity timestamp for power management
 static uint32_t last_activity_time = 0;
@@ -52,7 +56,14 @@ static bool is_deep_sleep_enabled = true; // Enable deep sleep by default
 void keyboard_activity_trigger(void) {
     last_activity_time = timer_read32();
     // Only perform power mode transition if needed
-    backlight_level(5);
+    backlight_toggle();
+    wait_ms(123);
+    backlight_toggle();
+    wait_ms(123);
+    backlight_toggle();
+    wait_ms(123);
+    backlight_toggle();
+    backlight_level(10);
     if (in_low_power_mode) {
         in_low_power_mode = false;
         // Restore backlight if it was on before low power mode
@@ -166,7 +177,7 @@ void power_management_task(void) {
         // Trigger activity to reset timers and potentially turn backlight on.
         // This should come after pins are restored to ensure proper hardware state.
         keyboard_activity_trigger();
-
+        perform_full_usb_reset();
         // runtime_init_bootrom_reset();
 
         backlight_toggle();
@@ -278,9 +289,11 @@ void keyboard_post_init_kb(void) {
 //     keyboard_activity_trigger(); // Initialize activity timer and ensure power mode state is set to active.
 //      
     backlight_toggle();
-    wait_ms(150);
+    wait_ms(100);
     backlight_toggle();
-    wait_ms(150);
+    
+
+    perform_full_usb_reset();
                                     // `in_low_power_mode` will be false (due to global variable initialization on reboot).
     // for (int i = 0; i < 8; i++) {
     //     backlight_toggle();
@@ -330,7 +343,7 @@ void housekeeping_task_kb(void) {
 //     suspend_power_down_user();
 // }
 
-// // Wake up from USB suspend
+// Wake up from USB suspend
 // void suspend_wakeup_init_kb(void) {
 //     is_usb_suspended = false;
 //     // Clocks should be fine as USB suspend isn't as deep as dormant.
@@ -339,3 +352,18 @@ void housekeeping_task_kb(void) {
 //     keyboard_activity_trigger(); 
 //     suspend_wakeup_init_user();
 // } 
+
+void perform_full_usb_reset(void) {
+    // Step 1: Perform hardware reset of the USB controller
+    reset_block(1u << RESET_USBCTRL);
+    // Use the SDK1XX compatibility alias if available, which takes a bitmask
+    unreset_block_wait(1u << RESET_USBCTRL);
+
+    // Optional: A short delay after hardware reset and before software re-init
+    wait_ms(50);
+
+    // Step 2: Re-initialize the ChibiOS/QMK USB driver software stack
+    // USB_DRIVER is a common QMK macro for the ChibiOS USBDriver instance (e.g. &USBD1)
+    // restart_usb_driver is provided by "protocol/chibios/usb_main.h"
+    restart_usb_driver(&USB_DRIVER);
+} 

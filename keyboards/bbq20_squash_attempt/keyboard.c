@@ -33,32 +33,12 @@ bool is_usb_suspended = false;  // Made global so trackpad.c can access it
 #define DEEP_SLEEP_TIMEOUT 60000 // 60 seconds for MCU deep sleep
 static bool is_deep_sleep_enabled = true; // Enable deep sleep by default
 
-// Pin for waking from deep sleep (Trackpad Motion/Button Pin) - This will be the pin passed to sleep_goto_dormant_until_pin,
-// but all column pins will be configured to trigger wake-up.
-// #define WAKEUP_PIN GP22 // This is pin_TP_MOTION from trackpad.c
-// #define WAKEUP_PIN GP8 // Changed to a keyboard matrix column pin
+// Pin for waking from deep sleep (Trackpad Motion/Button Pin) - This will be the pin passed to sleep_goto_dormant_until_pin
 #define WAKEUP_PIN GP9 // Corrected to the actual COL2 (GP9) based on schematic
-
-// Track backlight state - No longer needed, QMK handles this
-// static bool backlight_was_on = true; 
-
-// Helper to check if backlight is on (assume high = on) - No longer needed, use QMK's backlight_is_on() or backlight_get_level()
-// bool is_backlight_on(void) {
-//     return backlight_was_on;
-// }
-
-// Allow keymap to update backlight state - No longer needed
-// void set_backlight_state(bool on) {
-//     backlight_was_on = on;
-// }
 
 // Call this function whenever there's keyboard activity
 void keyboard_activity_trigger(void) {
     last_activity_time = timer_read32();
-    backlight_toggle();
-    wait_ms(200);
-    backlight_toggle();
-    backlight_level(10);
     if (in_low_power_mode) {
         in_low_power_mode = false;
         backlight_enable();
@@ -73,11 +53,11 @@ void power_management_task(void) {
     if (is_deep_sleep_enabled && elapsed_since_activity > DEEP_SLEEP_TIMEOUT) {
         // Entering deep sleep (dormant mode)
         backlight_toggle();
-        wait_ms(1050);
+        wait_ms(800);
         backlight_toggle();
-        wait_ms(1050);
+        wait_ms(800);
         backlight_toggle();
-        wait_ms(1050);
+        wait_ms(800);
         backlight_toggle();
 
         // Configure ROW pins to be low to allow columns to be pulled low for wake-up
@@ -106,25 +86,9 @@ void power_management_task(void) {
             uint8_t pin = row_pins_for_sleep_v2[i];
             gpio_init(pin);
         }
-        
-        keyboard_activity_trigger();
-        backlight_toggle();
-        wait_ms(1000);
-        backlight_toggle();
-        wait_ms(1000);
-        backlight_toggle();
-        wait_ms(1000);
-        backlight_toggle();
+       
         perform_full_usb_reset();
-        
-        wait_ms(1000);
-        backlight_toggle();
-        wait_ms(1000);
-        backlight_toggle();
-        wait_ms(1000);
-        backlight_toggle();
-        wait_ms(100);
-        backlight_toggle();
+        keyboard_activity_trigger();
     } 
     // Else, if not going into deep sleep, consider light low power mode
     else if (!is_usb_suspended && !in_low_power_mode && elapsed_since_activity > LOW_POWER_TIMEOUT) {
@@ -134,11 +98,7 @@ void power_management_task(void) {
 }
 
 void keyboard_post_init_kb(void) {
-    backlight_toggle();
-    wait_ms(100);
-    backlight_toggle();
-    
-    perform_full_usb_reset();
+    backlight_level(10);
 }
 
 bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
@@ -152,31 +112,6 @@ bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
 void housekeeping_task_kb(void) {
     power_management_task();
 }
-
-// Detect USB suspend state and adjust power accordingly
-// void suspend_power_down_kb(void) {
-//     is_usb_suspended = true;
-//     // trackpad.c's pointing_device_task checks is_usb_suspended and calls trackpad_sleep() if needed.
-//     // No need to call trackpad_sleep() directly here, to avoid potential race or double calls.
-//     if (!in_low_power_mode) { // Avoid redundant operations if already in low power from inactivity
-//         in_low_power_mode = true; // Set low power mode state
-//         if (get_backlight_level() > 0) {
-//             backlight_level(0);
-//         }
-//         // trackpad_sleep(); // Removed, handled by trackpad.c itself based on is_usb_suspended
-//     }
-//     suspend_power_down_user();
-// }
-
-// Wake up from USB suspend
-// void suspend_wakeup_init_kb(void) {
-//     is_usb_suspended = false;
-//     // Clocks should be fine as USB suspend isn't as deep as dormant.
-//     // Re-initialize sys clock to our desired frequency, in case it was changed.
-//     set_sys_clock_khz(96000, true);
-//     keyboard_activity_trigger(); 
-//     suspend_wakeup_init_user();
-// } 
 
 void perform_full_usb_reset(void) {
     // Step 1: Perform hardware reset of the USB controller
